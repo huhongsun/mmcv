@@ -1,4 +1,35 @@
-# Copyright (c) Open-MMLab. All rights reserved.
+# BSD 3-Clause License
+#
+# Copyright (c) 2017 xxxx
+# All rights reserved.
+# Copyright 2021 Huawei Technologies Co., Ltd
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# * Redistributions of source code must retain the above copyright notice, this
+#   list of conditions and the following disclaimer.
+#
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+#
+# * Neither the name of the copyright holder nor the names of its
+#   contributors may be used to endorse or promote products derived from
+#   this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# ============================================================================
+
 import functools
 import os
 import subprocess
@@ -13,7 +44,8 @@ from torch._utils import (_flatten_dense_tensors, _take_tensors,
 from mmcv.utils import TORCH_VERSION
 
 
-def init_dist(launcher, backend='nccl', **kwargs):
+# def init_dist(launcher, backend='nccl', **kwargs):  # changed by jyl
+def init_dist(launcher, backend='hccl', **kwargs):
     if mp.get_start_method(allow_none=True) is None:
         mp.set_start_method('spawn')
     if launcher == 'pytorch':
@@ -29,8 +61,12 @@ def init_dist(launcher, backend='nccl', **kwargs):
 def _init_dist_pytorch(backend, **kwargs):
     # TODO: use local_rank instead of rank % num_gpus
     rank = int(os.environ['RANK'])
-    num_gpus = torch.cuda.device_count()
-    torch.cuda.set_device(rank % num_gpus)
+    offset = 0 if os.getenv('NPUID', None) is None else int(os.environ['NPUID'])  # added by jyl
+    # num_gpus = torch.cuda.device_count()  # changed by jyl
+    num_npus = torch.npu.device_count()
+    # torch.cuda.set_device(rank % num_gpus)  # changed by jyl
+    # torch.npu.set_device((rank + offset) % num_npus + 6)
+    torch.npu.set_device((rank + offset) % num_npus)
     dist.init_process_group(backend=backend, **kwargs)
 
 
@@ -44,11 +80,9 @@ def _init_dist_mpi(backend, **kwargs):
 
 def _init_dist_slurm(backend, port=None):
     """Initialize slurm distributed training environment.
-
     If argument ``port`` is not specified, then the master port will be system
     environment variable ``MASTER_PORT``. If ``MASTER_PORT`` is not in system
     environment variable, then a default port ``29500`` will be used.
-
     Args:
         backend (str): Backend of torch.distributed.
         port (int, optional): Master port. Defaults to None.
@@ -107,7 +141,6 @@ def master_only(func):
 
 def allreduce_params(params, coalesce=True, bucket_size_mb=-1):
     """Allreduce parameters.
-
     Args:
         params (list[torch.Parameters]): List of parameters or buffers of a
             model.
@@ -129,7 +162,6 @@ def allreduce_params(params, coalesce=True, bucket_size_mb=-1):
 
 def allreduce_grads(params, coalesce=True, bucket_size_mb=-1):
     """Allreduce gradients.
-
     Args:
         params (list[torch.Parameters]): List of parameters of a model
         coalesce (bool, optional): Whether allreduce parameters as a whole.

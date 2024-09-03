@@ -1,4 +1,35 @@
-# Copyright (c) Open-MMLab. All rights reserved.
+# BSD 3-Clause License
+#
+# Copyright (c) 2017 xxxx
+# All rights reserved.
+# Copyright 2021 Huawei Technologies Co., Ltd
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# * Redistributions of source code must retain the above copyright notice, this
+#   list of conditions and the following disclaimer.
+#
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+#
+# * Neither the name of the copyright holder nor the names of its
+#   contributors may be used to endorse or promote products derived from
+#   this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# ============================================================================
+
 import copy
 from collections import defaultdict
 from itertools import chain
@@ -8,6 +39,7 @@ from torch.nn.utils import clip_grad
 from ..dist_utils import allreduce_grads
 from ..fp16_utils import LossScaler, wrap_fp16_model
 from .hook import HOOKS, Hook
+from apex import amp  # added by jyl 
 
 
 @HOOKS.register_module()
@@ -16,17 +48,25 @@ class OptimizerHook(Hook):
     def __init__(self, grad_clip=None):
         self.grad_clip = grad_clip
 
-    def clip_grads(self, params):
+    def clip_grads(self, params):  # changed by jyl    recall
+    # def clip_grads(self, params, optimizer=None):
         params = list(
             filter(lambda p: p.requires_grad and p.grad is not None, params))
         if len(params) > 0:
-            return clip_grad.clip_grad_norm_(params, **self.grad_clip)
+            return clip_grad.clip_grad_norm_(params, **self.grad_clip)   # changed by jyl   recall
+            # return clip_grad.clip_grad_norm_(amp.master_params(optimizer), **self.grad_clip)
 
     def after_train_iter(self, runner):
+        # runner.model.zero_grad() # added by myy   ???
         runner.optimizer.zero_grad()
-        runner.outputs['loss'].backward()
+        # runner.outputs['loss'].backward()  # annotated by myy
+        ############## added by jyl ############
+        with amp.scale_loss(runner.outputs['loss'], runner.optimizer) as scaled_loss:
+            scaled_loss.backward()
+        ############## added by jyl ############
         if self.grad_clip is not None:
-            grad_norm = self.clip_grads(runner.model.parameters())
+            grad_norm = self.clip_grads(runner.model.parameters())   # changed by jyl   recall
+            # grad_norm = self.clip_grads(runner.model.parameters(), runner.optimizer)
             if grad_norm is not None:
                 # Add grad norm to the logger
                 runner.log_buffer.update({'grad_norm': float(grad_norm)},
